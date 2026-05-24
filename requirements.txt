@@ -1,0 +1,1 @@
+aiogram flask pymongo dnspython
