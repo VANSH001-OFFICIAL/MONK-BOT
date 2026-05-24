@@ -348,7 +348,7 @@ HTML_TEMPLATE = """
                             <div class="coin-side side-back">VAULT</div>
                         </div>
                     </div>
-                    <div id="coin-log" class="small text-uppercase text-muted mb-2 font-monospace">Awaiting Flip Protocol</div>
+                    <div id="coin-log" class="small text-uppercase mb-2 font-monospace" style="color: white !important;">Awaiting Flip Protocol</div>
                     <button class="btn-monk m-0" onclick="triggerCoinFlip()">Flip Coin</button>
                 </div>
 
@@ -359,7 +359,7 @@ HTML_TEMPLATE = """
                         <div class="wheel-pin"></div>
                         <canvas class="wheel-canvas" id="wheelCanvas" width="210" height="210"></canvas>
                     </div>
-                    <div id="wheel-log" class="small text-uppercase text-muted mt-3 mb-2 font-monospace">Awaiting Spin Vector</div>
+                    <div id="wheel-log" class="small text-uppercase mt-3 mb-2 font-monospace" style="color: white !important;">Awaiting Spin Vector</div>
                     <button class="btn-monk m-0" onclick="triggerWheelSpin()">Spin Vector</button>
                 </div>
 
@@ -774,25 +774,37 @@ def get_user():
 def play_arena():
     data = request.json
     uid = int(data['id'])
-    u = users_col.find_one({"user_id": uid})
+    # Game ka naam frontend se 'game' key mein aa raha hai [cite: 140, 150]
+    game_type = data.get('game') 
+
+    # 1. Dice aur Scratch ko block karne ka logic
+    if game_type in ['dice', 'scratch']:
+        return jsonify({
+            "res": "ERR", 
+            "msg": "Ye game abhi band hai under maintenance"
+        })
+
+    u = users_col.find_one({"user_id": uid}) [cite: 191]
     
     if not u:
-        return jsonify({"res": "ERR", "msg": "User account interface disconnected."})
-    if u.get('points', 0.0) < 1.0:
-        return jsonify({"res": "ERR", "msg": "Insufficient Main Credits (1.00 needed)"})
-        
-    # Strictly consume 1 point on every execution across all systems
-    users_col.update_one({"user_id": uid}, {"$inc": {"points": -1.0}})
+        return jsonify({"res": "ERR", "msg": "User account interface disconnected."}) [cite: 191]
     
-    # Precise 40% Win Strategy Matrix Core Rule Update
-    win = random.random() < 0.40
+    if u.get('points', 0.0) < 1.0:
+        return jsonify({"res": "ERR", "msg": "Insufficient Main Credits (1.00 needed)"}) [cite: 191]
+        
+    # Strictly consume 1 point on every execution
+    users_col.update_one({"user_id": uid}, {"$inc": {"points": -1.0}}) [cite: 191]
+    
+    # Win/Loss logic (baki games ke liye jaise Flip aur Spin)
+    win = random.random() < 0.40 [cite: 192]
     if win:
-        users_col.update_one({"user_id": uid}, {"$inc": {"wager": 2.0}})
-        history_col.insert_one({"user_id": uid, "reason": f"Game match won", "points": -1.0})
-        return jsonify({"res": "WIN", "val": "+2.00 Wager Tokens"})
+        users_col.update_one({"user_id": uid}, {"$inc": {"wager": 2.0}}) [cite: 192]
+        history_col.insert_one({"user_id": uid, "reason": f"Game match won", "points": -1.0}) [cite: 192]
+        return jsonify({"res": "WIN", "val": "+2.00 Wager Tokens"}) [cite: 192]
     else:
-        history_col.insert_one({"user_id": uid, "reason": f"Game match lost", "points": -1.0})
-        return jsonify({"res": "LOSE", "val": "No Rewards Dispatched"})
+        history_col.insert_one({"user_id": uid, "reason": f"Game match lost", "points": -1.0}) [cite: 192]
+        return jsonify({"res": "LOSE", "val": "No Rewards Dispatched"}) [cite: 192]
+
 
 @app.route('/api/lb')
 def leaderboard():
@@ -864,7 +876,12 @@ async def start_handler(m: Message):
 async def add_command_initiator(m: Message, state: FSMContext):
     await m.answer("<b>[ADMIN PROTOCOL]</b>\nPlease post the standard label string reference for transaction history logs tracking:")
     await state.set_state(AdminAddStates.waiting_for_reason)
-
+@dp.message(Command("remove"))
+async def admin_rem(m: Message, state: FSMContext):
+    await state.update_data(is_rem=True)
+    await m.answer("Enter Reason for Deduction:")
+    await state.set_state(AdminStates.waiting_for_reason)
+    
 @dp.message(AdminAddStates.waiting_for_reason)
 async def add_reason_catcher(m: Message, state: FSMContext):
     await state.update_data(reason=m.text.strip())
