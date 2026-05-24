@@ -4,20 +4,22 @@ import random
 import string
 import threading
 import time
+import logging
+from datetime import datetime
 from flask import Flask, render_template_string, jsonify, request
-from aiogram import Bot, Dispatcher, html
-from aiogram.filters import CommandStart, Command
+from aiogram import Bot, Dispatcher, html, F
+from aiogram.filters import CommandStart, Command, BaseFilter
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from pymongo import MongoClient
+from pymongo import MongoClient, DESCENDING
 
 # ================= CONFIGURATION =================
-# Replace with your actual credentials if they change
 BOT_TOKEN = "8445493171:AAFpi_rg_CSImfp0vjvtsxuxQ-k2Wsv3ds0" 
 MONGO_URI = "mongodb+srv://shaurya59rt_db_user:admin123@cluster0.sw408wn.mongodb.net/?appName=Cluster0"
 MINI_APP_URL = "https://monk-bot-sh8z.onrender.com" 
+ADMIN_IDS = [6498723145, 123456789] # Add your Telegram ID here
 
 # ================= MONGODB SETUP =================
 client = MongoClient(MONGO_URI)
@@ -25,11 +27,19 @@ db = client['telegram_bot_db']
 users_col = db['users']      
 history_col = db['history']  
 teams_col = db['teams']      
+settings_col = db['settings']
+
+# Ensure Indexes for performance
+users_col.create_index([("user_id", 1)], unique=True)
+history_col.create_index([("user_id", 1)])
+
+# ================= LOGGING =================
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("MonkBot")
 
 # ================= FLASK SERVER (MINI APP) =================
 app = Flask(__name__)
 
-# This template is highly expanded with advanced CSS and JS modules to ensure 700+ lines of logic.
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
@@ -46,478 +56,370 @@ HTML_TEMPLATE = """
         :root {
             --monk-gold: #FFD700;
             --monk-gold-glow: rgba(255, 215, 0, 0.4);
-            --bg-obsidian: #050505;
-            --bg-card: rgba(15, 15, 15, 0.85);
-            --accent-gold: #c5a059;
+            --bg-obsidian: #080808;
+            --bg-card: rgba(20, 20, 20, 0.95);
+            --accent-gold: #C5A059;
+            --text-gray: #A0A0A0;
             --glass: rgba(255, 255, 255, 0.03);
+            --win-green: #4ADE80;
+            --loss-red: #F87171;
         }
 
-        /* RESET & BASE */
-        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        /* BASE THEME FIXES */
         body { 
             background: var(--bg-obsidian); 
             color: #ffffff; 
             font-family: 'Inter', sans-serif;
             margin: 0; padding: 0;
-            overflow-x: hidden;
+            overflow: hidden;
             height: 100vh;
         }
 
-        /* 1. MONK TASK 3-SECOND SPLASH SCREEN */
+        /* 1. ANIMATED SPLASH SCREEN */
         #splash-screen {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: radial-gradient(circle at center, #1a1a1a 0%, #000 100%);
-            z-index: 10000; display: flex; flex-direction: column;
-            align-items: center; justify-content: center;
-            transition: opacity 0.8s ease-out;
+            background: #000; z-index: 10000; display: flex;
+            flex-direction: column; align-items: center; justify-content: center;
         }
-        .monk-logo-container {
-            position: relative; width: 120px; height: 120px;
-            margin-bottom: 30px;
-        }
+        .monk-logo-container { position: relative; width: 100px; height: 100px; }
         .monk-ring {
             position: absolute; width: 100%; height: 100%;
-            border: 2px solid var(--monk-gold); border-radius: 50%;
-            border-top-color: transparent; border-bottom-color: transparent;
-            animation: rotateRing 1.5s linear infinite;
+            border: 3px solid var(--monk-gold); border-radius: 50%;
+            border-top-color: transparent; animation: spin 1s linear infinite;
         }
-        .monk-center {
-            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            font-family: 'Cinzel', serif; color: var(--monk-gold); font-size: 40px;
-            text-shadow: 0 0 20px var(--monk-gold-glow);
-        }
-        @keyframes rotateRing { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-        .splash-text {
-            font-family: 'Orbitron', sans-serif; letter-spacing: 8px;
-            color: var(--monk-gold); text-transform: uppercase; font-size: 14px;
-            animation: pulseText 2s infinite;
-        }
-        @keyframes pulseText { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(0.95); } }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
-        /* 2. PREMIUM UI NAVIGATION */
+        /* 2. NAVIGATION OVERHAUL */
         .premium-nav {
             position: fixed; bottom: 0; left: 0; width: 100%;
-            background: rgba(0, 0, 0, 0.95); backdrop-filter: blur(20px);
-            border-top: 1px solid rgba(255, 215, 0, 0.2);
-            display: flex; justify-content: space-around; padding: 12px 0 25px 0;
+            background: rgba(10, 10, 10, 0.98); backdrop-filter: blur(25px);
+            border-top: 1px solid rgba(255, 215, 0, 0.15);
+            display: flex; justify-content: space-around; padding: 15px 0 30px 0;
             z-index: 9000;
         }
-        .nav-link {
-            text-align: center; color: #666; text-decoration: none;
-            font-size: 10px; font-weight: 900; letter-spacing: 1px;
-            text-transform: uppercase; transition: 0.3s;
+        .nav-item {
+            display: flex; flex-direction: column; align-items: center;
+            color: var(--text-gray); text-decoration: none; font-size: 10px;
+            font-family: 'Orbitron'; font-weight: 900; transition: 0.3s;
         }
-        .nav-link i { display: block; font-size: 20px; margin-bottom: 4px; }
-        .nav-link.active { color: var(--monk-gold); text-shadow: 0 0 10px var(--monk-gold-glow); }
+        .nav-item.active { color: var(--monk-gold); text-shadow: 0 0 15px var(--monk-gold-glow); }
 
-        /* 3. CONTENT AREA */
+        /* 3. CARD SYSTEM */
         #app-viewport {
-            height: 100vh; overflow-y: auto; padding: 25px 20px 120px 20px;
+            height: 100vh; overflow-y: auto; padding: 20px 20px 140px 20px;
             display: none;
         }
-        .view-section { display: none; }
-        .view-section.active { display: block; animation: fadeInUp 0.5s; }
-
-        /* 4. MONK TASK CARDS */
         .gold-card {
-            background: var(--bg-card); border: 1px solid rgba(255, 215, 0, 0.1);
-            border-radius: 20px; padding: 20px; margin-bottom: 20px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-            position: relative; overflow: hidden;
+            background: var(--bg-card); border: 1px solid rgba(255, 215, 0, 0.08);
+            border-radius: 18px; padding: 20px; margin-bottom: 18px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.8);
         }
-        .gold-card::before {
-            content: ''; position: absolute; top: 0; left: -100%; width: 100%; height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(255,215,0,0.05), transparent);
-            transition: 0.5s;
-        }
-        .gold-card:hover::before { left: 100%; }
+        .stat-header { font-family: 'Orbitron'; font-size: 10px; color: var(--accent-gold); letter-spacing: 1px; }
+        .stat-value { font-family: 'Orbitron'; font-size: 24px; font-weight: 900; color: #fff; }
 
-        .stat-header { font-family: 'Orbitron', sans-serif; font-size: 11px; color: var(--accent-gold); margin-bottom: 5px; }
-        .stat-value { font-family: 'Orbitron', sans-serif; font-size: 28px; font-weight: 900; color: #fff; }
-
-        /* 5. ARENA MODULES */
+        /* 4. ARENA UI */
         .arena-box {
-            height: 200px; background: rgba(255,255,255,0.02);
-            border-radius: 15px; display: flex; align-items: center;
-            justify-content: center; margin-bottom: 20px;
-            border: 1px dashed rgba(255,215,0,0.2);
+            height: 180px; background: rgba(0,0,0,0.4); border-radius: 20px;
+            display: flex; align-items: center; justify-content: center;
+            margin-bottom: 20px; border: 1px solid rgba(255,215,0,0.1);
+            position: relative;
         }
-        .dice-3d { width: 60px; height: 60px; transform-style: preserve-3d; transition: 0.5s; }
-        
-        .btn-monk {
-            background: linear-gradient(135deg, #FFD700 0%, #b8860b 100%);
-            color: #000; border: none; padding: 15px; border-radius: 12px;
-            width: 100%; font-family: 'Orbitron', sans-serif; font-weight: 900;
-            text-transform: uppercase; margin-bottom: 12px;
-            box-shadow: 0 4px 15px rgba(255,215,0,0.3);
+        .btn-monk-prime {
+            background: linear-gradient(135deg, #FFD700, #B8860B);
+            border: none; color: #000; font-family: 'Orbitron';
+            font-weight: 900; padding: 16px; border-radius: 12px;
+            width: 100%; margin-bottom: 12px; box-shadow: 0 5px 20px rgba(255,215,0,0.2);
         }
-        .btn-monk:active { transform: scale(0.97); }
 
-        /* 6. LEADERBOARD STYLE */
-        .rank-row {
-            display: flex; align-items: center; justify-content: space-between;
-            padding: 15px; border-bottom: 1px solid rgba(255,255,255,0.05);
+        /* 5. HISTORY LIST */
+        .hist-item {
+            display: flex; justify-content: space-between; padding: 12px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.03);
         }
-        .rank-num { font-family: 'Orbitron'; color: var(--monk-gold); width: 30px; }
+        .hist-reason { font-size: 12px; color: #eee; }
+        .hist-pts { font-family: 'Orbitron'; font-size: 12px; font-weight: 900; }
         
-        /* 7. CUSTOM SCROLLBAR */
-        ::-webkit-scrollbar { width: 4px; }
-        ::-webkit-scrollbar-track { background: #000; }
-        ::-webkit-scrollbar-thumb { background: var(--accent-gold); border-radius: 10px; }
+        .view-section { display: none; }
+        .view-section.active { display: block; animation: fadeIn 0.4s ease; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
 <body>
 
     <div id="splash-screen">
-        <div class="monk-logo-container">
-            <div class="monk-ring"></div>
-            <div class="monk-center">M</div>
-        </div>
-        <div class="splash-text">Monk Task</div>
-        <div style="margin-top: 15px; font-size: 10px; color: #444;">Initializing Premium Core...</div>
+        <div class="monk-logo-container"><div class="monk-ring"></div></div>
+        <div style="margin-top:20px; font-family:'Orbitron'; color:var(--monk-gold); letter-spacing:5px;">MONK CORE</div>
     </div>
 
     <div id="app-viewport">
-        
         <div id="view-task" class="view-section active">
-            <div class="d-flex justify-content-between align-items-center mb-4">
+            <div class="d-flex justify-content-between mb-4">
                 <div>
-                    <div style="font-size: 12px; color: var(--accent-gold); font-weight: 900; text-transform: uppercase;">Operative</div>
-                    <h4 id="ui-username" style="font-family: 'Orbitron'; font-weight: 900;">---</h4>
+                    <div class="stat-header">OPERATIVE</div>
+                    <div id="ui-username" style="font-family:'Orbitron'; font-size:18px;">---</div>
                 </div>
                 <div class="text-end">
-                    <div id="ui-rank" style="background: rgba(255,215,0,0.1); padding: 5px 15px; border-radius: 20px; color: var(--monk-gold); font-size: 12px; font-weight: 900; border: 1px solid var(--monk-gold);">Rank --</div>
+                    <div id="ui-rank" class="badge" style="background:rgba(255,215,0,0.1); border:1px solid var(--monk-gold); color:var(--monk-gold);">Rank --</div>
                 </div>
             </div>
 
             <div class="gold-card">
-                <div class="stat-header">Available Credits</div>
+                <div class="stat-header">TOTAL CREDITS</div>
                 <div class="stat-value" id="ui-points">0.00</div>
-                <div style="margin-top: 10px; height: 4px; background: #222; border-radius: 2px;">
-                    <div id="ui-progress" style="width: 0%; height: 100%; background: var(--monk-gold); border-radius: 2px; box-shadow: 0 0 10px var(--monk-gold);"></div>
+                <div class="progress mt-3" style="height:4px; background:#111;">
+                    <div id="ui-progress" class="progress-bar" style="background:var(--monk-gold); width:0%;"></div>
                 </div>
             </div>
 
-            <div class="row g-3 mb-4">
+            <div class="row g-2 mb-4">
                 <div class="col-6">
-                    <div class="gold-card m-0 py-3 text-center">
-                        <div class="stat-header">Wagered</div>
-                        <div style="font-family: 'Orbitron'; font-weight: 900;" id="ui-wager">0.0</div>
+                    <div class="gold-card text-center p-3">
+                        <div class="stat-header">WAGER</div>
+                        <div id="ui-wager" style="font-family:'Orbitron'; font-weight:900;">0.0</div>
                     </div>
                 </div>
                 <div class="col-6">
-                    <div class="gold-card m-0 py-3 text-center">
-                        <div class="stat-header">Status</div>
-                        <div style="font-family: 'Orbitron'; font-weight: 900; color: #4ade80;">Active</div>
+                    <div class="gold-card text-center p-3">
+                        <div class="stat-header">STATUS</div>
+                        <div style="color:var(--win-green); font-family:'Orbitron'; font-weight:900;">ELITE</div>
                     </div>
                 </div>
             </div>
 
-            <h6 style="font-family: 'Orbitron'; font-size: 12px; color: var(--accent-gold); margin-bottom: 15px;">Transaction History</h6>
+            <div class="stat-header mb-3">SYSTEM LOGS</div>
             <div id="ui-history"></div>
         </div>
 
         <div id="view-arena" class="view-section">
-            <h4 class="text-center mb-4" style="font-family: 'Orbitron'; font-weight: 900; letter-spacing: 2px;">Monk Arena</h4>
-            
-            <div class="gold-card">
-                <div class="arena-box" id="game-stage">
-                    <div id="stage-icon" style="font-size: 60px;">☯️</div>
-                </div>
-                <div id="game-log" class="text-center small text-muted text-uppercase mb-2" style="font-weight: 900; letter-spacing: 1px;">Awaiting Selection...</div>
+            <div class="arena-box">
+                <div id="arena-display" style="font-size: 50px;">⛩️</div>
             </div>
-
-            <button class="btn-monk" onclick="handleArena('dice')">Roll Monk Dice</button>
-            <button class="btn-monk" onclick="handleArena('flip')">Flip Monk Coin</button>
-            <button class="btn-monk" style="background: transparent; border: 1px solid var(--monk-gold); color: var(--monk-gold);" onclick="handleArena('spin')">Monk Wheel</button>
+            <div id="arena-status" class="text-center small mb-4" style="color:var(--accent-gold); font-family:'Orbitron';">READY FOR ACTION</div>
+            <button class="btn-monk-prime" onclick="playGame('dice')">ROLL MONK DICE</button>
+            <button class="btn-monk-prime" onclick="playGame('flip')">COIN SANCTUARY</button>
+            <button class="btn-monk-prime" style="background:transparent; border:1px solid var(--monk-gold); color:var(--monk-gold);" onclick="playGame('spin')">FORTUNE WHEEL</button>
         </div>
 
         <div id="view-ranks" class="view-section">
-            <h4 class="mb-4" style="font-family: 'Orbitron'; font-weight: 900;">Global Ranks</h4>
+            <h4 class="mb-4" style="font-family:'Orbitron'; color:var(--monk-gold);">GLOBAL LEADERS</h4>
             <div id="ui-leaderboard"></div>
         </div>
 
         <div id="view-team" class="view-section">
-            <div id="team-setup-ui">
-                <h4 class="mb-4" style="font-family: 'Orbitron'; font-weight: 900;">Team Protocol</h4>
+            <div id="team-setup">
                 <div class="gold-card">
-                    <div class="stat-header">Form New Squad</div>
-                    <input type="text" id="inp-tname" class="form-control bg-dark border-secondary text-white mb-3" placeholder="Squad Designation">
-                    <button class="btn-monk btn-sm" onclick="teamAction('create')">Initialize</button>
+                    <div class="stat-header">CREATE SQUAD</div>
+                    <input type="text" id="t-name" class="form-control bg-dark text-white border-secondary mt-2 mb-3" placeholder="Squad Name">
+                    <button class="btn-monk-prime btn-sm" onclick="teamAction('create')">INITIATE</button>
                 </div>
                 <div class="gold-card">
-                    <div class="stat-header">Access Existing Squad</div>
-                    <input type="text" id="inp-tcode" class="form-control bg-dark border-secondary text-white mb-3" placeholder="TEAM-XXXXXX">
-                    <button class="btn-monk btn-sm" onclick="teamAction('join')">Authenticate</button>
+                    <div class="stat-header">JOIN SQUAD</div>
+                    <input type="text" id="t-code" class="form-control bg-dark text-white border-secondary mt-2 mb-3" placeholder="MONK-XXXXXX">
+                    <button class="btn-monk-prime btn-sm" onclick="teamAction('join')">AUTHENTICATE</button>
                 </div>
             </div>
-            
-            <div id="team-active-ui" style="display:none;">
+            <div id="team-info" style="display:none;">
                 <div class="gold-card text-center">
-                    <h3 id="active-team-name" style="font-family: 'Orbitron'; color: var(--monk-gold);">---</h3>
-                    <code id="active-team-code" class="d-block mb-3" style="color: #666;">---</code>
-                    <button class="btn btn-outline-danger btn-sm w-100" onclick="teamAction('leave')">Decommission Squad</button>
+                    <h3 id="ui-team-name" style="color:var(--monk-gold); font-family:'Orbitron';">---</h3>
+                    <code id="ui-team-code" class="text-muted">---</code>
                 </div>
-                <h6 class="mt-4 mb-3" style="font-family: 'Orbitron'; font-size: 12px; color: var(--accent-gold);">Squad Operatives</h6>
-                <div id="ui-team-list"></div>
+                <div id="ui-team-members"></div>
             </div>
         </div>
-
     </div>
 
     <nav class="premium-nav">
-        <div class="nav-link active" onclick="switchView('task', this)">Task</div>
-        <div class="nav-link" onclick="switchView('arena', this)">Arena</div>
-        <div class="nav-link" onclick="switchView('ranks', this)">Ranks</div>
-        <div class="nav-link" onclick="switchView('team', this)">Team</div>
+        <a href="#" class="nav-item active" onclick="switchTab('task', this)"><span>DASH</span></a>
+        <a href="#" class="nav-item" onclick="switchTab('arena', this)"><span>ARENA</span></a>
+        <a href="#" class="nav-item" onclick="switchTab('ranks', this)"><span>RANKS</span></a>
+        <a href="#" class="nav-item" onclick="switchTab('team', this)"><span>TEAM</span></a>
     </nav>
 
     <script>
         const tg = window.Telegram.WebApp;
         tg.expand();
-        tg.headerColor = "#050505";
+        const UID = tg.initDataUnsafe?.user?.id || 12345;
+        const UNAME = tg.initDataUnsafe?.user?.first_name || "Guest";
 
-        const USER_ID = tg.initDataUnsafe?.user?.id || 123456;
-        const USER_NAME = tg.initDataUnsafe?.user?.first_name || "Monk Operative";
+        setTimeout(() => {
+            document.getElementById('splash-screen').style.display = 'none';
+            document.getElementById('app-viewport').style.display = 'block';
+            refreshAll();
+        }, 2500);
 
-        // 3-SECOND SPLASH SCREEN LOGIC
-        window.addEventListener('load', () => {
-            setTimeout(() => {
-                const splash = document.getElementById('splash-screen');
-                splash.style.opacity = '0';
-                setTimeout(() => {
-                    splash.style.display = 'none';
-                    document.getElementById('app-viewport').style.display = 'block';
-                    refreshDashboard();
-                }, 800);
-            }, 3000);
-        });
-
-        function switchView(viewId, el) {
-            document.querySelectorAll('.view-section').forEach(s => s.classList.remove('active'));
-            document.querySelectorAll('.nav-link').forEach(n => n.classList.remove('active'));
-            
-            document.getElementById('view-' + viewId).classList.add('active');
+        function switchTab(id, el) {
+            document.querySelectorAll('.view-section').forEach(v => v.classList.remove('active'));
+            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+            document.getElementById('view-'+id).classList.add('active');
             el.classList.add('active');
-
-            if(viewId === 'task') refreshDashboard();
-            if(viewId === 'ranks') loadLeaderboard();
-            if(viewId === 'team') loadTeamInfo();
+            refreshAll();
         }
 
-        async function refreshDashboard() {
-            const res = await fetch(`/api/user?id=${USER_ID}&name=${encodeURIComponent(USER_NAME)}`);
-            const data = await res.json();
+        async function refreshAll() {
+            const r = await fetch(`/api/sync?id=${UID}&name=${encodeURIComponent(UNAME)}`);
+            const d = await r.json();
             
-            document.getElementById('ui-username').innerText = USER_NAME;
-            document.getElementById('ui-points').innerText = data.points.toFixed(2);
-            document.getElementById('ui-wager').innerText = data.wager.toFixed(1);
-            document.getElementById('ui-rank').innerText = "Rank #" + data.rank;
-            
-            // Progress bar logic (points out of 100)
-            let prog = Math.min((data.points / 100) * 100, 100);
-            document.getElementById('ui-progress').style.width = prog + "%";
+            document.getElementById('ui-username').innerText = UNAME;
+            document.getElementById('ui-points').innerText = d.points.toFixed(2);
+            document.getElementById('ui-wager').innerText = d.wager.toFixed(1);
+            document.getElementById('ui-rank').innerText = "#" + d.rank;
+            document.getElementById('ui-progress').style.width = Math.min(d.points, 100) + "%";
 
-            document.getElementById('ui-history').innerHTML = data.history.map(h => `
-                <div class="gold-card py-2 px-3 mb-2 d-flex justify-content-between align-items-center">
-                    <span style="font-size: 11px;">${h.reason}</span>
-                    <span style="color: ${h.pts > 0 ? '#4ade80':'#f87171'}; font-weight: 900; font-family: 'Orbitron'; font-size: 11px;">
-                        ${h.pts > 0 ? '+':''}${h.pts.toFixed(1)}
-                    </span>
-                </div>
-            `).join('') || '<div class="text-center text-muted small">No logs in system</div>';
-        }
-
-        async function handleArena(mode) {
-            const log = document.getElementById('game-log');
-            const stage = document.getElementById('game-stage');
-            
-            log.innerText = "Synchronizing Arena...";
-            stage.innerHTML = '<div class="spinner-border text-warning" role="status"></div>';
-
-            const res = await fetch('/api/play', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({id: USER_ID, game: mode})
-            });
-            const data = await res.json();
-
-            setTimeout(() => {
-                if(data.res === 'ERR') {
-                    alert(data.msg);
-                    stage.innerHTML = '<div style="font-size: 60px;">❌</div>';
-                    log.innerText = "Access Denied";
-                } else {
-                    stage.innerHTML = `<div style="font-size: 60px;">${data.res === 'WIN' ? '💎' : '💥'}</div>`;
-                    log.innerText = `${data.res}: ${data.val}`;
-                    refreshDashboard();
-                }
-            }, 1000);
-        }
-
-        async function loadLeaderboard() {
-            const res = await fetch('/api/lb?type=users');
-            const data = await res.json();
-            document.getElementById('ui-leaderboard').innerHTML = data.map((u, i) => `
-                <div class="rank-row">
-                    <span class="rank-num">#${i+1}</span>
-                    <span style="flex-grow:1; font-weight:bold;">${u.name}</span>
-                    <span style="color:var(--monk-gold); font-family:'Orbitron';">${u.pts.toFixed(1)}</span>
+            // History Mapping
+            document.getElementById('ui-history').innerHTML = d.history.map(h => `
+                <div class="hist-item">
+                    <span class="hist-reason">${h.msg}</span>
+                    <span class="hist-pts" style="color:${h.val > 0 ? 'var(--win-green)':'var(--loss-red)'}">${h.val > 0 ? '+':''}${h.val}</span>
                 </div>
             `).join('');
-        }
 
-        async function loadTeamInfo() {
-            const res = await fetch(`/api/team?id=${USER_ID}`);
-            const data = await res.json();
-            if(data.has) {
-                document.getElementById('team-setup-ui').style.display = 'none';
-                document.getElementById('team-active-ui').style.display = 'block';
-                document.getElementById('active-team-name').innerText = data.name;
-                document.getElementById('active-team-code').innerText = data.code;
-                document.getElementById('ui-team-list').innerHTML = data.m.map(m => `
-                    <div class="rank-row">
-                        <span>${m.name}</span>
-                        <span class="text-muted small">${m.pts.toFixed(1)}</span>
+            // Leaderboard
+            if(d.lb) {
+                document.getElementById('ui-leaderboard').innerHTML = d.lb.map((u, i) => `
+                    <div class="hist-item">
+                        <span>#${i+1} ${u.name}</span>
+                        <span class="hist-pts" style="color:var(--monk-gold)">${u.pts}</span>
                     </div>
                 `).join('');
-            } else {
-                document.getElementById('team-setup-ui').style.display = 'block';
-                document.getElementById('team-active-ui').style.display = 'none';
             }
         }
 
-        async function teamAction(act) {
-            const name = document.getElementById('inp-tname').value;
-            const code = document.getElementById('inp-tcode').value;
-            const res = await fetch('/api/team_act', {
+        async function playGame(type) {
+            const btn = event.target;
+            btn.disabled = true;
+            document.getElementById('arena-display').innerHTML = '🌀';
+            
+            const r = await fetch('/api/play', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({id: USER_ID, action: act, tname: name, tcode: code})
+                body: JSON.stringify({id: UID, game: type})
             });
-            const data = await res.json();
-            alert(data.msg);
-            loadTeamInfo();
+            const d = await r.json();
+            
+            setTimeout(() => {
+                document.getElementById('arena-display').innerHTML = d.win ? '💎' : '💀';
+                document.getElementById('arena-status').innerText = d.win ? "WIN: " + d.amt : "LOSS: " + d.amt;
+                btn.disabled = false;
+                refreshAll();
+            }, 800);
         }
     </script>
 </body>
 </html>
 """
 
-# ================= BACKEND LOGIC =================
+# ================= API ENDPOINTS =================
 
-@app.route('/')
-def home():
-    return render_template_string(HTML_TEMPLATE)
-
-@app.route('/api/user')
-def get_user():
+@app.route('/api/sync')
+def sync_data():
     uid = int(request.args.get('id', 0))
-    name = request.args.get('name', 'Unknown')
-    u = users_col.find_one({"user_id": uid})
-    if not u:
-        u = {"user_id": uid, "username": name, "points": 10.0, "wager": 0.0, "team_code": None}
-        users_col.insert_one(u)
+    name = request.args.get('name', 'User')
     
+    # User Fetch/Create
+    u = users_col.find_one_and_update(
+        {"user_id": uid},
+        {"$set": {"username": name}, "$setOnInsert": {"points": 50.0, "wager": 0.0, "team_code": None}},
+        upsert=True, return_document=True
+    )
+
+    # Rank Calculation
     all_users = list(users_col.find().sort("points", -1))
-    rank = next((i + 1 for i, item in enumerate(all_users) if item["user_id"] == uid), "--")
+    rank = next((i + 1 for i, x in enumerate(all_users) if x['user_id'] == uid), 99)
     
-    hist = list(history_col.find({"user_id": uid}).sort("_id", -1).limit(6))
-    h_data = [{"reason": x['reason'], "pts": x['points']} for x in hist]
+    # History
+    hist = list(history_col.find({"user_id": uid}).sort("_id", -1).limit(8))
     
+    # Leaderboard
+    lb = [{"name": x['username'], "pts": x['points']} for x in all_users[:10]]
+
     return jsonify({
-        "points": u.get('points', 0.0), 
-        "wager": u.get('wager', 0.0), 
-        "rank": rank, 
-        "history": h_data
+        "points": u['points'],
+        "wager": u['wager'],
+        "rank": rank,
+        "lb": lb,
+        "history": [{"msg": x['reason'], "val": x['points']} for x in hist]
     })
 
 @app.route('/api/play', methods=['POST'])
-def play_arena():
+def play():
     data = request.json
     uid = int(data['id'])
     u = users_col.find_one({"user_id": uid})
     
-    if u['points'] < 1:
-        return jsonify({"res": "ERR", "msg": "Insufficient Credits"})
-    
-    win = random.random() < 0.35 # 35% Win rate for premium balance
-    if win:
-        users_col.update_one({"user_id": uid}, {"$inc": {"wager": 2.0}})
-        history_col.insert_one({"user_id": uid, "reason": "Arena Victory", "points": 2.0})
-        return jsonify({"res": "WIN", "val": "+2.0 Wager Credits"})
-    else:
-        users_col.update_one({"user_id": uid}, {"$inc": {"points": -1.0}})
-        history_col.insert_one({"user_id": uid, "reason": "Arena Loss", "points": -1.0})
-        return jsonify({"res": "LOSE", "val": "-1.0 Wallet Credit"})
+    if u['points'] < 5:
+        return jsonify({"win": False, "amt": "Insufficient Points (Min 5)"})
 
-@app.route('/api/lb')
-def leaderboard():
-    data = users_col.find().sort("points", -1).limit(20)
-    return jsonify([{"name": x['username'], "pts": x['points']} for x in data])
-
-@app.route('/api/team')
-def team_info():
-    uid = int(request.args.get('id'))
-    u = users_col.find_one({"user_id": uid})
-    if not u or not u.get('team_code'):
-        return jsonify({"has": False})
+    win = random.random() < 0.3 # 30% Chance
+    amt = 10.0 if win else -5.0
+    reason = "Arena Victory" if win else "Arena Defeat"
     
-    t = teams_col.find_one({"code": u['team_code']})
-    members = list(users_col.find({"team_code": u['team_code']}))
-    m_list = [{"name": x['username'], "pts": x['points']} for x in members]
+    users_col.update_one({"user_id": uid}, {"$inc": {"points": amt, "wager": 1.0 if win else 0}})
+    history_col.insert_one({"user_id": uid, "reason": reason, "points": amt, "ts": datetime.now()})
     
-    return jsonify({
-        "has": True, 
-        "name": t['name'], 
-        "code": t['code'], 
-        "m": m_list
-    })
+    return jsonify({"win": win, "amt": amt})
 
-@app.route('/api/team_act', methods=['POST'])
-def team_action():
-    d = request.json
-    uid, act, tname, tcode = d['id'], d['action'], d.get('tname'), d.get('tcode')
-    
-    if act == 'create':
-        code = "MONK-" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
-        teams_col.insert_one({"code": code, "name": tname})
-        users_col.update_one({"user_id": uid}, {"$set": {"team_code": code}})
-        return jsonify({"msg": f"Squad Created: {code}"})
-    elif act == 'join':
-        exists = teams_col.find_one({"code": tcode})
-        if exists:
-            users_col.update_one({"user_id": uid}, {"$set": {"team_code": tcode}})
-            return jsonify({"msg": "Authenticated with Squad"})
-        return jsonify({"msg": "Invalid Squad Code"})
-    elif act == 'leave':
-        users_col.update_one({"user_id": uid}, {"$set": {"team_code": None}})
-        return jsonify({"msg": "Squad Abandoned"})
-
-# ================= TELEGRAM BOT =================
+# ================= TELEGRAM BOT (AIOGRAM 3.x) =================
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
-@dp.message(CommandStart())
-async def start_handler(m: Message):
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="Enter Monk Arena ⛩️", web_app=WebAppInfo(url=MINI_APP_URL))
-    ]])
-    await m.answer(
-        f"<b>Welcome Operative {m.from_user.first_name}</b>\n\n"
-        "The Monk Task Premium system is online. Click below to access your dashboard.",
-        reply_markup=kb,
-        parse_mode="HTML"
-    )
+class AdminFilter(BaseFilter):
+    async def __call__(self, m: Message) -> bool:
+        return m.from_user.id in ADMIN_IDS
 
-async def start_services():
-    # Flask in background
-    threading.Thread(target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False, use_reloader=False), daemon=True).start()
-    # Bot in foreground
+@dp.message(CommandStart())
+async def cmd_start(m: Message):
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="⛩️ ENTER ARENA", web_app=WebAppInfo(url=MINI_APP_URL))
+    ]])
+    welcome = (
+        f"<b>Welcome, Operative {m.from_user.first_name}</b>\n\n"
+        "Status: <code>Connected to Monk-Net</code>\n"
+        "Access Level: <code>Premium Tier</code>\n\n"
+        "Use the Mini App below to manage your credits and participate in the Arena."
+    )
+    await m.answer(welcome, reply_markup=kb, parse_mode="HTML")
+
+@dp.message(Command("add"), AdminFilter())
+async def cmd_add(m: Message):
+    """Usage: /add <user_id> <points> <reason>"""
+    try:
+        args = m.text.split(maxsplit=3)
+        target_id = int(args[1])
+        pts = float(args[2])
+        reason = args[3] if len(args) > 3 else "Admin Adjustment"
+
+        res = users_col.update_one(
+            {"user_id": target_id}, 
+            {"$inc": {"points": pts}}, 
+            upsert=True
+        )
+        
+        history_col.insert_one({
+            "user_id": target_id,
+            "reason": f"🎁 {reason}",
+            "points": pts,
+            "ts": datetime.now()
+        })
+
+        await m.reply(f"✅ <b>Successfully processed:</b>\nID: <code>{target_id}</code>\nAmt: <code>{pts}</code>")
+        try:
+            await bot.send_message(target_id, f"🎁 <b>Wallet Updated!</b>\nAmount: +{pts}\nReason: {reason}")
+        except:
+            pass
+    except Exception as e:
+        await m.reply(f"❌ Error: {e}\nFormat: `/add ID PTS REASON`")
+
+# ================= SERVICE ORCHESTRATION =================
+def run_flask():
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+
+async def main():
+    threading.Thread(target=run_flask, daemon=True).start()
+    logger.info("Web Services Hosted.")
     await dp.start_polling(bot)
 
 if __name__ == '__main__':
     try:
-        asyncio.run(start_services())
+        asyncio.run(main())
     except KeyboardInterrupt:
-        pass
+        logger.info("Offline.")
