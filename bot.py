@@ -19,7 +19,7 @@ BOT_TOKEN = "8445493171:AAFpi_rg_CSImfp0vjvtsxuxQ-k2Wsv3ds0"
 # Agar Atlas hai to waha ki connection string daalo
 MONGO_URI = "mongodb+srv://shaurya59rt_db_user:admin123@cluster0.sw408wn.mongodb.net/?appName=Cluster0"
 
-MINI_APP_URL = "monk-bot1.onrender.com" 
+MINI_APP_URL = "https://monk-bot-sh8z.onrender.com" 
 
 # ================= MONGODB SETUP =================
 client = MongoClient(MONGO_URI)
