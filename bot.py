@@ -263,7 +263,17 @@ def play():
         res = "LOSE"
     return jsonify({"res": res})
 
-def run_f(): app.run(port=5000)
+# ================= 4. FLASK ROUTING & APIS =================
+# ... (baki saare routes same rahenge)
+
+# Isko update karo: Render ka dynamic port read karne ke liye
+def run_f():
+    # OS se PORT environment variable uthayega, nahi to default 5000 use karega
+    port = int(os.environ.get("PORT", 5000))
+    # Render par host '0.0.0.0' hona compulsory hai
+    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+
+# ================= 6. BOOTSTRAP EXECUTOR =================
 
 # ================= TELEGRAM BOT (AIOGRAM) =================
 bot = Bot(token=BOT_TOKEN)
@@ -310,4 +320,9 @@ async def main():
     await dp.start_polling(bot)
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    # Flask ko thread me start kiya
+    threading.Thread(target=run_f, daemon=True).start()
+    
+    # Main loop me bot polling
+    print("MongoDB Server ready & Bot Online!")
+    asyncio.run(dp.start_polling(bot))
